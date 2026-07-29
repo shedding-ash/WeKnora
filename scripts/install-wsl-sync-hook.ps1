@@ -23,12 +23,26 @@ $hook = @"
 
 while read local_ref local_sha remote_ref remote_sha
 do
+  branch=""
   case "`$local_ref" in
     refs/heads/*)
       branch="`${local_ref#refs/heads/}"
-      MSYS2_ARG_CONV_EXCL='*' powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$scriptPathForHook" -WslPath "$WslPath" -Remote "$Remote" -Branch "`$branch" -ExpectedSha "`$local_sha" >> "$logPath" 2>&1 &
+      ;;
+    HEAD)
+      case "`$remote_ref" in
+        refs/heads/*)
+          branch="`${remote_ref#refs/heads/}"
+          ;;
+        *)
+          branch="`$(git branch --show-current)"
+          ;;
+      esac
       ;;
   esac
+
+  if [ -n "`$branch" ]; then
+      MSYS2_ARG_CONV_EXCL='*' powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "$scriptPathForHook" -WslPath "$WslPath" -Remote "$Remote" -Branch "`$branch" -ExpectedSha "`$local_sha" >> "$logPath" 2>&1 &
+  fi
 done
 
 exit 0
