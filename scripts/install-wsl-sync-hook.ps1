@@ -35,6 +35,16 @@ exit 0
 "@
 
 Set-Content -LiteralPath $hookPath -Value $hook -NoNewline -Encoding ASCII
+
+$gitExe = (Get-Command git.exe -ErrorAction SilentlyContinue).Source
+if ($gitExe) {
+    $gitRoot = Split-Path (Split-Path $gitExe -Parent) -Parent
+    $chmod = Join-Path $gitRoot "usr\bin\chmod.exe"
+    if (Test-Path -LiteralPath $chmod) {
+        & $chmod +x $hookPath
+    }
+}
+
 Write-Host "Installed pre-push hook at $hookPath"
 Write-Host "WSL deploy path: $WslPath"
 Write-Host "Remote: $Remote"
