@@ -176,6 +176,18 @@ func (s *WikiLintService) RunLint(ctx context.Context, kbID string) (*WikiLintRe
 					})
 				}
 			}
+			for _, inLink := range page.InLinks {
+				if !slugSet[inLink] {
+					issues = append(issues, WikiLintIssue{
+						Type:        LintIssueBrokenLink,
+						Severity:    SeverityError,
+						PageSlug:    page.Slug,
+						TargetSlug:  inLink,
+						Description: fmt.Sprintf("Page '%s' has a stale inbound link from [[%s]] which does not exist", page.Title, inLink),
+						AutoFixable: true,
+					})
+				}
+			}
 
 			// Check 3: Empty content.
 			content := strings.TrimSpace(page.Content)

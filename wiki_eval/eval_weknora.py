@@ -193,6 +193,28 @@ def _delete_link_metrics(ps, target_id, target_doc, remove_links):
         'stale_inlink_pages': stale_link_pages,
     }
 
+def wait_delete_links_reconciled(c,kb,target_id,target_doc,remove_links,raw,timeout=900,interval=10):
+    print(f'[wait-delete-links] timeout={timeout}s')
+    start=time.time(); i=0; last_metrics=None
+    while time.time()-start<timeout:
+        i+=1
+        snapshot = fetch_pages(c,kb,raw/f'poll_{i:03d}')
+        metrics = _delete_link_metrics(snapshot,target_id,target_doc,remove_links)
+        last_metrics = metrics
+        wjson(raw/f'poll_{i:03d}_metrics.json',metrics)
+        rate = metrics.get('must_remove_in_links_rate')
+        stale = metrics.get('stale_inlink_count')
+        print(f'[wait-delete-links] poll={i} must_remove_in_links={rate} stale_inlinks={stale}')
+        rate_done = rate is None or rate >= 1.0
+        stale_done = stale == 0
+        if rate_done and stale_done:
+            wjson(raw/'reconciled.json',{'reconciled':True,'polls':i,'metrics':metrics})
+            return snapshot, metrics
+        time.sleep(interval)
+    print('[wait-delete-links] timeout; continuing with last observed link state')
+    wjson(raw/'reconciled.json',{'reconciled':False,'polls':i,'metrics':last_metrics})
+    return snapshot if 'snapshot' in locals() else fetch_pages(c,kb,raw/'timeout_snapshot'), last_metrics or {}
+
 def wait_deleted(c,kb,kid,raw,timeout=900,interval=10):
     print(f'[wait-delete] timeout={timeout}s')
     start=time.time(); last=-1; stable=0; i=0
@@ -250,8 +272,11 @@ def eval_delete(c,kb,dataset,report,cfg,run,timeout_sec=900,interval_sec=10,min_
             rows.append({'event_id':case.get('event_id'),'target_doc_id':target_doc,'error':str(e),'source_ref_cleanup_rate':None,'must_remove_source_refs_rate':None,'must_remove_in_links_rate':None,'must_remove_terms_absence_rate':None,'expected_deleted_page_absence_rate':None,'keep_page_presence_rate':None,'keep_page_unchanged_rate':None,'stale_inlink_count':None,'stale_inlink_page_rate':None,'false_del_rate':None,'idempotent_retract':False})
             continue
         wait_deleted(c,kb_del,target_id,case_raw/'after_delete',timeout_sec,interval_sec)
-        time.sleep(interval_sec*2)
-        s1 = fetch_pages(c,kb_del,case_raw/'after')
+        remove_links = [str(x) for x in impact.get('must_remove_in_links',[]) or []]
+        s1, native_link_metrics = wait_delete_links_reconciled(
+            c,kb_del,target_id,target_doc,remove_links,case_raw/'after_links',
+            timeout_sec,interval_sec)
+        wjson(case_raw/'after'/'pages.json',[p.raw for p in s1])
         s1_by_slug = _pages_by_slug(s1)
         cleaned_refs = 0
         for p in pages_with_target_s0:
@@ -264,8 +289,6 @@ def eval_delete(c,kb,dataset,report,cfg,run,timeout_sec=900,interval_sec=10,min_
         source_ref_cleanup_rate = cleaned_refs / len(pages_with_target_s0) if pages_with_target_s0 else None
         # Backward-compatible alias. Historically named leak_strip_rate, but it is a cleanup rate.
         leak_strip_rate = source_ref_cleanup_rate
-        remove_links = [str(x) for x in impact.get('must_remove_in_links',[]) or []]
-        native_link_metrics = _delete_link_metrics(s1, target_id, target_doc, remove_links)
         stale_link_pages = native_link_metrics['stale_inlink_pages']
         stale_inlink_count = native_link_metrics['stale_inlink_count']
         stale_inlink_page_rate = native_link_metrics['stale_inlink_page_rate']
